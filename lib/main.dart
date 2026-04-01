@@ -1,5 +1,21 @@
+import 'dart:async';
+
+import 'package:driver_app/core/theme/app_theme.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:provider/provider.dart';
+import 'core/constants/app_constant.dart';
+import 'features/driver/data/datasource/firebase_datasource.dart';
+import 'features/driver/data/datasource/location_datasource.dart';
+import 'features/driver/data/repositories/driver_tracking_repository_impl.dart';
+import 'features/driver/domain/usecases/get_current_location.dart';
+import 'features/driver/domain/usecases/start_tracking.dart';
+import 'features/driver/domain/usecases/stop_tracking.dart';
+import 'features/driver/presentation/controller/driver_tracking_controller.dart';
+import 'features/driver/presentation/screens/driver_home_screen.dart';
 import 'firebase_options.dart';
 
 
@@ -8,8 +24,30 @@ Future<void> main() async {
 await Firebase.initializeApp(
   options: DefaultFirebaseOptions.currentPlatform,
 );
-  runApp(const MyApp());
+ 
+ 
+  await configureBackgroundService();
+
+  final service = FlutterBackgroundService();
+
+  final repository = DriverTrackingRepositoryImpl(
+    locationDataSource: LocationDataSource(),
+    firebaseDataSource: FirebaseDataSource(),
+    service: service,
+  );
+
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => DriverTrackingController(
+        getCurrentLocationUseCase: GetCurrentLocation(repository),
+        startTrackingUseCase: StartTracking(repository),
+        stopTrackingUseCase: StopTracking(repository),
+      )..init(),
+      child: const MyApp(),
+    ),
+  );
 }
+
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -18,112 +56,95 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
+       themeMode: ThemeMode.system,
+      home: const DriverHomeScreen(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
+Future<void> configureBackgroundService() async {
+  final service = FlutterBackgroundService();
 
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  await service.configure(
+    androidConfiguration: AndroidConfiguration(
+      onStart: onStart,
+      autoStart: false,
+      isForegroundMode: true,
+      foregroundServiceNotificationId: 1001,
+    ),
+    iosConfiguration: IosConfiguration(),
+  );
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+@pragma('vm:entry-point')
+void onStart(ServiceInstance service) async {
+  WidgetsFlutterBinding.ensureInitialized();
+await Firebase.initializeApp(
+  options: DefaultFirebaseOptions.currentPlatform,
+);
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+  final dbRef = FirebaseDatabase.instance.ref(AppConstants.firebaseDriverPath);
+  StreamSubscription<Position>? positionSubscription;
+
+  if (service is AndroidServiceInstance) {
+    service.setForegroundNotificationInfo(
+      title: 'Delivery Tracking Active',
+      content: 'Preparing location updates...',
+    );
+  }
+
+  service.on('startTracking').listen((event) async {
+    await positionSubscription?.cancel();
+
+    final permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      return;
+    }
+
+    const locationSettings = LocationSettings(
+      accuracy: LocationAccuracy.bestForNavigation,
+      distanceFilter: 5
+    );
+
+    positionSubscription = Geolocator.getPositionStream(
+      locationSettings: locationSettings,
+    ).listen((position) async {
+      await dbRef.set({
+        'lat': position.latitude,
+        'lng': position.longitude,
+        'timestamp': DateTime.now().toIso8601String(),
+        'isTracking': true,
+      });
+
+      if (service is AndroidServiceInstance) {
+        service.setForegroundNotificationInfo(
+          title: 'Delivery Tracking Active',
+          content:
+              'Lat: ${position.latitude.toStringAsFixed(5)}, Lng: ${position.longitude.toStringAsFixed(5)}',
+        );
+      }
     });
-  }
+  });
 
-  @override
-  Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
-    return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ),
-    );
-  }
+  service.on('stopTracking').listen((event) async {
+    await positionSubscription?.cancel();
+    positionSubscription = null;
+
+    await dbRef.update({
+      'isTracking': false,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+
+    if (service is AndroidServiceInstance) {
+      service.setForegroundNotificationInfo(
+        title: 'Delivery Tracking Stopped',
+        content: 'Location updates stopped',
+      );
+    }
+  });
 }
