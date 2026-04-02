@@ -1,9 +1,7 @@
 import 'package:driver_app/features/driver/presentation/screens/live_tracking_screen.dart';
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
 
-import '../../../../core/constants/app_constant.dart';
 import '../controller/driver_tracking_controller.dart';
 
 class DriverHomeScreen extends StatelessWidget {
@@ -169,8 +167,7 @@ class DriverHomeScreen extends StatelessWidget {
                 iconColor: Colors.redAccent,
               ),
               const SizedBox(height: 24),
-             
-             
+
               const SizedBox(height: 16),
               ElevatedButton.icon(
                 onPressed: controller.requestLocationPermission,
@@ -198,15 +195,17 @@ class DriverHomeScreen extends StatelessWidget {
               ElevatedButton.icon(
                 onPressed: () async {
                   controller.isTracking
-                    ? null
-                    : await controller.startTracking();
-if (context.mounted && controller.isTracking) {
-  Navigator.push(
-    context,
-    MaterialPageRoute(builder: (_) => const LiveTrackingScreen()),
-  );
-}
-                    },
+                      ? null
+                      : await controller.startTracking();
+                  if (context.mounted && controller.isTracking) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const LiveTrackingScreen(),
+                      ),
+                    );
+                  }
+                },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF1FAA59),
                   foregroundColor: Colors.white,
@@ -233,5 +232,3 @@ if (context.mounted && controller.isTracking) {
     );
   }
 }
-
-

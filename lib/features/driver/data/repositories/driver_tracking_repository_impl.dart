@@ -1,3 +1,4 @@
+
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 
@@ -41,8 +42,9 @@ class DriverTrackingRepositoryImpl implements DriverTrackingRepository {
       await service.startService();
       await Future.delayed(const Duration(seconds: 1));
     }
-
+debugPrint(isRunning ? 'Background service already running' : 'Background service started');
     service.invoke('startTracking');
+     await firebaseDataSource.updateTrackingStatus(true);
   }
 
   @override

@@ -341,7 +341,7 @@ static const double _cameraUpdateDistanceThreshold = 10;
       _destination.latitude,
       _destination.longitude,
     );
-
+debugPrint('Distance to destination: $distance');
     if (distance <= 30) {
       _hasShownReachedDialog = true;
       _showReachedDialog();
@@ -421,16 +421,7 @@ static const double _cameraUpdateDistanceThreshold = 10;
       ),
       body: Column(
         children: [
-          if (_routeDebugMessage != null)
-            Container(
-              width: double.infinity,
-              color: Colors.black87,
-              padding: const EdgeInsets.all(10),
-              child: Text(
-                _routeDebugMessage!,
-                style: const TextStyle(color: Colors.white),
-              ),
-            ),
+         
           if (!controller.isTracking)
             Container(
               width: double.infinity,

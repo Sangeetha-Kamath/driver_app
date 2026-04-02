@@ -8,7 +8,6 @@ import '../../domain/entities/driver_location.dart';
 import '../../domain/usecases/get_current_location.dart';
 import '../../domain/usecases/start_tracking.dart';
 import '../../domain/usecases/stop_tracking.dart';
-import '../screens/live_tracking_screen.dart';
 
 class DriverTrackingController extends ChangeNotifier {
   final GetCurrentLocation getCurrentLocationUseCase;
@@ -112,6 +111,8 @@ class DriverTrackingController extends ChangeNotifier {
     }
 
     try {
+      
+  
       // Start Firebase/background service updates
       await startTrackingUseCase.call();
 
@@ -128,14 +129,15 @@ class DriverTrackingController extends ChangeNotifier {
           Geolocator.getPositionStream(
             locationSettings: locationSettings,
           ).listen(
-            (position) {
+            (position) async {
               currentLocation = DriverLocation(
                 latitude: position.latitude,
                 longitude: position.longitude,
                 timestamp: DateTime.now(),
                 isTracking: true,
               );
-
+              
+            
               notifyListeners();
             },
             onError: (error) {
@@ -150,7 +152,7 @@ class DriverTrackingController extends ChangeNotifier {
       debugPrint('startTracking error: $e');
       statusText = 'Failed to start tracking';
       notifyListeners();
-    } finally {}
+    } 
   }
 
   Future<void> stopTracking() async {

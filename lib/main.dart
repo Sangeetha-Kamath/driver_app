@@ -29,10 +29,16 @@ await Firebase.initializeApp(
   await configureBackgroundService();
 
   final service = FlutterBackgroundService();
+  final firebaseDatabase = FirebaseDatabase.instanceFor(
+    app: Firebase.app(),
+    databaseURL:
+        AppConstants.databaseUrl,
+  );
+  final FirebaseDataSource firebaseDataSource = FirebaseDataSource(database: firebaseDatabase);
 
   final repository = DriverTrackingRepositoryImpl(
     locationDataSource: LocationDataSource(),
-    firebaseDataSource: FirebaseDataSource(),
+    firebaseDataSource: firebaseDataSource,
     service: service,
   );
 
@@ -83,58 +89,69 @@ Future<void> configureBackgroundService() async {
 @pragma('vm:entry-point')
 void onStart(ServiceInstance service) async {
   WidgetsFlutterBinding.ensureInitialized();
-await Firebase.initializeApp(
-  options: DefaultFirebaseOptions.currentPlatform,
-);
 
-  final dbRef = FirebaseDatabase.instance.ref(AppConstants.firebaseDriverPath);
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  debugPrint('Firebase initialized inside background isolate');
+
+  final firebaseDatabase = FirebaseDatabase.instanceFor(
+    app: Firebase.app(),
+    databaseURL: AppConstants.databaseUrl,
+  );
+  debugPrint('onStart() CALLED in background isolate');
+
+  final dbRef = firebaseDatabase.ref(AppConstants.firebaseDriverPath);
+
   StreamSubscription<Position>? positionSubscription;
-
-  if (service is AndroidServiceInstance) {
-    service.setForegroundNotificationInfo(
-      title: 'Delivery Tracking Active',
-      content: 'Preparing location updates...',
-    );
-  }
 
   service.on('startTracking').listen((event) async {
     await positionSubscription?.cancel();
 
     final permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
+        permission == LocationPermission.deniedForever) {   
+      debugPrint('Permission denied');
       return;
     }
 
     const locationSettings = LocationSettings(
       accuracy: LocationAccuracy.bestForNavigation,
-      distanceFilter: 5
+      //distanceFilter: 5,
     );
 
     positionSubscription = Geolocator.getPositionStream(
       locationSettings: locationSettings,
     ).listen((position) async {
-      await dbRef.set({
-        'lat': position.latitude,
-        'lng': position.longitude,
-        'timestamp': DateTime.now().toIso8601String(),
-        'isTracking': true,
-      });
+      try {
+        debugPrint('Before Firebase update: ${position.latitude}, ${position.longitude}');
 
-      if (service is AndroidServiceInstance) {
-        service.setForegroundNotificationInfo(
-          title: 'Delivery Tracking Active',
-          content:
-              'Lat: ${position.latitude.toStringAsFixed(5)}, Lng: ${position.longitude.toStringAsFixed(5)}',
+        await dbRef.update({
+          'lat': position.latitude,
+          'lng': position.longitude,
+          'timestamp': DateTime.now().toIso8601String(),
+          'isTracking': true,
+        }).timeout(
+          const Duration(seconds: 8),
+          onTimeout: () => throw Exception('Firebase update timed out'),
         );
+
+        debugPrint('After Firebase update');
+
+        final snapshot = await dbRef.get();
+        debugPrint('Firebase value after write: ${snapshot.value}');
+      } catch (e, st) {
+        debugPrint('Firebase write error: $e');
+        debugPrint('$st');
       }
     });
   });
 
+
   service.on('stopTracking').listen((event) async {
     await positionSubscription?.cancel();
     positionSubscription = null;
-
+    
     await dbRef.update({
       'isTracking': false,
       'timestamp': DateTime.now().toIso8601String(),
